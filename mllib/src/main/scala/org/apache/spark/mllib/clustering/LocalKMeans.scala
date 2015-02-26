@@ -38,7 +38,8 @@ private[mllib] object LocalKMeans extends Logging {
       points: Array[VectorWithNorm],
       weights: Array[Double],
       k: Int,
-      maxIterations: Int
+      maxIterations: Int,
+      useCosineDist: Boolean
   ): Array[VectorWithNorm] = {
     val rand = new Random(seed)
     val dimensions = points(0).vector.size
@@ -50,13 +51,13 @@ private[mllib] object LocalKMeans extends Logging {
       // Pick the next center with a probability proportional to cost under current centers
       val curCenters = centers.view.take(i)
       val sum = points.view.zip(weights).map { case (p, w) =>
-        w * KMeans.pointCost(curCenters, p)
+        w * KMeans.pointCost(curCenters, p, useCosineDist)
       }.sum
       val r = rand.nextDouble() * sum
       var cumulativeScore = 0.0
       var j = 0
       while (j < points.length && cumulativeScore < r) {
-        cumulativeScore += weights(j) * KMeans.pointCost(curCenters, points(j))
+        cumulativeScore += weights(j) * KMeans.pointCost(curCenters, points(j), useCosineDist)
         j += 1
       }
       if (j == 0) {
@@ -79,7 +80,7 @@ private[mllib] object LocalKMeans extends Logging {
       var i = 0
       while (i < points.length) {
         val p = points(i)
-        val index = KMeans.findClosest(centers, p)._1
+        val index = KMeans.findClosest(centers, p, useCosineDist)._1
         axpy(weights(i), p.vector, sums(index))
         counts(index) += weights(i)
         if (index != oldClosest(i)) {

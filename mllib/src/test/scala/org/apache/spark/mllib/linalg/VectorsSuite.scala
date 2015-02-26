@@ -268,4 +268,29 @@ class VectorsSuite extends FunSuite {
     assert(Vectors.norm(sv, 3.7) ~== math.pow(sv.toArray.foldLeft(0.0)((a, v) =>
       a + math.pow(math.abs(v), 3.7)), 1.0 / 3.7) relTol 1E-8)
   }
+
+  test("vector dot product") {
+    val dv: Vector = Vectors.dense(0.0, -1.2, 3.1, 0.0, -4.5, 1.9)
+    val sv: Vector = Vectors.sparse(6, Seq((1, -1.2), (2, 3.1), (3, 0.0), (4, -4.5), (5, 1.9)))
+
+    var expected = -1.2 * -1.2 + 3.1 * 3.1 + -4.5 * -4.5 + 1.9 * 1.9
+    assert(Vectors.dot(dv, dv) ~== expected relTol 1E-8)
+    assert(Vectors.dot(dv, sv) ~== expected relTol 1E-8)
+    assert(Vectors.dot(sv, dv) ~== expected relTol 1E-8)
+    assert(Vectors.dot(sv, sv) ~== expected relTol 1E-8)
+
+    val dv2: Vector = Vectors.dense(1.2, -3.4, 0.01)
+    val sv2: Vector = Vectors.sparse(3, Seq((0, -1.2), (2, 100.0)))
+
+    expected = 1.2 * 1.2 + -3.4 * -3.4 + 0.01 * 0.01
+    assert(Vectors.dot(dv2, dv2) ~== expected relTol 1E-8)
+
+    expected = 1.2 * -1.2 + -3.4 * 0.0 + 0.01 * 100.0
+    assert(Vectors.dot(dv2, sv2) ~== expected relTol 1E-8)
+    assert(Vectors.dot(sv2, dv2) ~== expected relTol 1E-8)
+
+    expected = -1.2 * -1.2 + 0.0 * 0.0 + 100.0 * 100.0
+    assert(Vectors.dot(sv2, sv2) ~== expected relTol 1E-8)
+  }
+
 }

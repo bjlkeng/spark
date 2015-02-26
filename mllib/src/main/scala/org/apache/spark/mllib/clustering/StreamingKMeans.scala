@@ -67,7 +67,7 @@ import org.apache.spark.util.random.XORShiftRandom
 @Experimental
 class StreamingKMeansModel(
     override val clusterCenters: Array[Vector],
-    val clusterWeights: Array[Double]) extends KMeansModel(clusterCenters) with Logging {
+    val clusterWeights: Array[Double]) extends KMeansModel(clusterCenters, false) with Logging {
 
   /** Perform a k-means update on a batch of data. */
   def update(data: RDD[Vector], decayFactor: Double, timeUnit: String): StreamingKMeansModel = {

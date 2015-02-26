@@ -44,13 +44,14 @@ class KMeans private (
     private var initializationMode: String,
     private var initializationSteps: Int,
     private var epsilon: Double,
-    private var seed: Long) extends Serializable with Logging {
+    private var seed: Long,
+    private var useCosineDist: Boolean) extends Serializable with Logging {
 
   /**
    * Constructs a KMeans instance with default parameters: {k: 2, maxIterations: 20, runs: 1,
    * initializationMode: "k-means||", initializationSteps: 5, epsilon: 1e-4, seed: random}.
    */
-  def this() = this(2, 20, 1, KMeans.K_MEANS_PARALLEL, 5, 1e-4, Utils.random.nextLong())
+  def this() = this(2, 20, 1, KMeans.K_MEANS_PARALLEL, 5, 1e-4, Utils.random.nextLong(), false)
 
   /** Set the number of clusters to create (k). Default: 2. */
   def setK(k: Int): this.type = {
@@ -116,6 +117,12 @@ class KMeans private (
   /** Set the random seed for cluster initialization. */
   def setSeed(seed: Long): this.type = {
     this.seed = seed
+    this
+  }
+
+  /** Set whether or not to use cosine distance. */
+  def setSpherical(useCosineDist: Boolean): this.type = {
+    this.useCosineDist = useCosineDist
     this
   }
 
@@ -199,7 +206,7 @@ class KMeans private (
 
         points.foreach { point =>
           (0 until runs).foreach { i =>
-            val (bestCenter, cost) = KMeans.findClosest(thisActiveCenters(i), point)
+            val (bestCenter, cost) = KMeans.findClosest(thisActiveCenters(i), point, useCosineDist)
             costAccums(i) += cost
             val sum = sums(i)(bestCenter)
             axpy(1.0, point.vector, sum)
@@ -253,7 +260,7 @@ class KMeans private (
 
     logInfo(s"The cost for the best run is $minCost.")
 
-    new KMeansModel(centers(bestRun).map(_.vector))
+    new KMeansModel(centers(bestRun).map(_.vector), useCosineDist)
   }
 
   /**
@@ -308,7 +315,7 @@ class KMeans private (
       costs = data.zip(preCosts).map { case (point, cost) =>
         Vectors.dense(
           Array.tabulate(runs) { r =>
-            math.min(KMeans.pointCost(bcNewCenters.value(r), point), cost(r))
+            math.min(KMeans.pointCost(bcNewCenters.value(r), point, useCosineDist), cost(r))
           })
       }.cache()
       val sumCosts = costs
@@ -350,13 +357,13 @@ class KMeans private (
     val bcCenters = data.context.broadcast(centers)
     val weightMap = data.flatMap { p =>
       Iterator.tabulate(runs) { r =>
-        ((r, KMeans.findClosest(bcCenters.value(r), p)._1), 1.0)
+        ((r, KMeans.findClosest(bcCenters.value(r), p, useCosineDist)._1), 1.0)
       }
     }.reduceByKey(_ + _).collectAsMap()
     val finalCenters = (0 until runs).par.map { r =>
       val myCenters = centers(r).toArray
       val myWeights = (0 until myCenters.length).map(i => weightMap.getOrElse((r, i), 0.0)).toArray
-      LocalKMeans.kMeansPlusPlus(r, myCenters, myWeights, k, 30)
+      LocalKMeans.kMeansPlusPlus(r, myCenters, myWeights, k, 30, useCosineDist)
     }
 
     finalCenters.toArray
@@ -446,23 +453,36 @@ object KMeans {
    */
   private[mllib] def findClosest(
       centers: TraversableOnce[VectorWithNorm],
-      point: VectorWithNorm): (Int, Double) = {
+      point: VectorWithNorm,
+      useCosineDist: Boolean): (Int, Double) = {
     var bestDistance = Double.PositiveInfinity
     var bestIndex = 0
     var i = 0
+
     centers.foreach { center =>
-      // Since `\|a - b\| \geq |\|a\| - \|b\||`, we can use this lower bound to avoid unnecessary
-      // distance computation.
-      var lowerBoundOfSqDist = center.norm - point.norm
-      lowerBoundOfSqDist = lowerBoundOfSqDist * lowerBoundOfSqDist
-      if (lowerBoundOfSqDist < bestDistance) {
-        val distance: Double = fastSquaredDistance(center, point)
+      if (!useCosineDist) {
+        // Regular Euclidean Distance
+        // Since `\|a - b\| \geq |\|a\| - \|b\||`, we can use this lower bound to avoid unnecessary
+        // distance computation.
+        var lowerBoundOfSqDist = center.norm - point.norm
+          lowerBoundOfSqDist = lowerBoundOfSqDist * lowerBoundOfSqDist
+          if (lowerBoundOfSqDist < bestDistance) {
+            val distance: Double = fastSquaredDistance(center, point)
+              if (distance < bestDistance) {
+                bestDistance = distance
+                bestIndex = i
+              }
+          }
+        i += 1
+      } else {
+        // Use Cosine Distance = 1 - cos(\theta) = 1 - A \cdot B / (||A|| * ||B||)
+        val dot: Double = Vectors.dot(center.vector, point.vector)
+        val distance: Double = 1 -  dot / center.norm / point.norm
         if (distance < bestDistance) {
           bestDistance = distance
           bestIndex = i
         }
       }
-      i += 1
     }
     (bestIndex, bestDistance)
   }
@@ -472,8 +492,9 @@ object KMeans {
    */
   private[mllib] def pointCost(
       centers: TraversableOnce[VectorWithNorm],
-      point: VectorWithNorm): Double =
-    findClosest(centers, point)._2
+      point: VectorWithNorm,
+      useCosineDist: Boolean): Double =
+    findClosest(centers, point, useCosineDist)._2
 
   /**
    * Returns the squared Euclidean distance between two vectors computed by
