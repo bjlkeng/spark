@@ -286,6 +286,7 @@ class KMeans private (
    */
   private def initKMeansParallel(data: RDD[VectorWithNorm])
   : Array[Array[VectorWithNorm]] = {
+    require(!useCosineDist, "Spherical KMeans not implemented with KMeans Parallel")
     // Initialize empty centers and point costs.
     val centers = Array.tabulate(runs)(r => ArrayBuffer.empty[VectorWithNorm])
     var costs = data.map(_ => Vectors.dense(Array.fill(runs)(Double.PositiveInfinity))).cache()
@@ -449,6 +450,76 @@ object KMeans {
   }
 
   /**
+   * Trains a k-means model using the given set of parameters.
+   *
+   * @param data training points stored as `RDD[Vector]`
+   * @param k number of clusters
+   * @param maxIterations max number of iterations
+   * @param runs number of parallel runs, defaults to 1. The best model is returned.
+   * @param initializationMode initialization model, either "random" or "k-means||" (default).
+   * @param seed random seed value for cluster initialization
+   */
+  def trainSpherical(
+      data: RDD[Vector],
+      k: Int,
+      maxIterations: Int,
+      runs: Int,
+      initializationMode: String,
+      seed: Long): KMeansModel = {
+    new KMeans().setK(k)
+      .setMaxIterations(maxIterations)
+      .setRuns(runs)
+      .setInitializationMode(initializationMode)
+      .setSeed(seed)
+      .setSpherical(true)
+      .run(data)
+  }
+
+  /**
+   * Trains a k-means model using the given set of parameters.
+   *
+   * @param data training points stored as `RDD[Vector]`
+   * @param k number of clusters
+   * @param maxIterations max number of iterations
+   * @param runs number of parallel runs, defaults to 1. The best model is returned.
+   * @param initializationMode initialization model, either "random" or "k-means||" (default).
+   */
+  def trainSpherical(
+      data: RDD[Vector],
+      k: Int,
+      maxIterations: Int,
+      runs: Int,
+      initializationMode: String): KMeansModel = {
+    new KMeans().setK(k)
+      .setMaxIterations(maxIterations)
+      .setRuns(runs)
+      .setInitializationMode(initializationMode)
+      .setSpherical(true)
+      .run(data)
+  }
+
+  /**
+   * Trains a k-means model using specified parameters and the default values for unspecified.
+   */
+  def trainSpherical(
+      data: RDD[Vector],
+      k: Int,
+      maxIterations: Int): KMeansModel = {
+    trainSpherical(data, k, maxIterations, 1, RANDOM)
+  }
+
+  /**
+   * Trains a k-means model using specified parameters and the default values for unspecified.
+   */
+  def trainSpherical(
+      data: RDD[Vector],
+      k: Int,
+      maxIterations: Int,
+      runs: Int): KMeansModel = {
+    trainSpherical(data, k, maxIterations, runs, RANDOM)
+  }
+
+  /**
    * Returns the index of the closest center to the given point, as well as the squared distance.
    */
   private[mllib] def findClosest(
@@ -473,7 +544,6 @@ object KMeans {
                 bestIndex = i
               }
           }
-        i += 1
       } else {
         // Use Cosine Distance = 1 - cos(\theta) = 1 - A \cdot B / (||A|| * ||B||)
         val dot: Double = Vectors.dot(center.vector, point.vector)
@@ -483,6 +553,7 @@ object KMeans {
           bestIndex = i
         }
       }
+      i += 1
     }
     (bestIndex, bestDistance)
   }

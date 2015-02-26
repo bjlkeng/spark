@@ -62,6 +62,24 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
     model = KMeans.train(
       data, k = 1, maxIterations = 1, runs = 1, initializationMode = K_MEANS_PARALLEL)
     assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 2)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 5)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 5)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 5)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 1, initializationMode = RANDOM)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
   }
 
   test("no distinct points") {
@@ -76,6 +94,9 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
     // Make sure code runs.
     var model = KMeans.train(data, k=2, maxIterations=1)
     assert(model.clusterCenters.size === 2)
+
+    model = KMeans.trainSpherical(data, k=2, maxIterations=1)
+    assert(model.clusterCenters.size === 2)
   }
 
   test("more clusters than points") {
@@ -87,6 +108,8 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
 
     // Make sure code runs.
     var model = KMeans.train(data, k=3, maxIterations=1)
+    assert(model.clusterCenters.size === 3)
+    model = KMeans.trainSpherical(data, k=3, maxIterations=1)
     assert(model.clusterCenters.size === 3)
   }
 
@@ -108,6 +131,26 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
       centers1.zip(centers2).foreach { case (c1, c2) =>
         assert(c1 ~== c2 absTol 1E-14)
       }
+    }
+  }
+
+  test("deterministic initialization - spherical") {
+    // Create a large-ish set of points for clustering
+    val points = List.tabulate(1000)(n => Vectors.dense(n, n))
+    val rdd = sc.parallelize(points, 3)
+
+    val initMode = RANDOM
+    // Create three deterministic models and compare cluster means
+    val model1 = KMeans.train(rdd, k = 10, maxIterations = 2, runs = 1,
+      initializationMode = initMode, seed = 42)
+    val centers1 = model1.clusterCenters
+
+    val model2 = KMeans.train(rdd, k = 10, maxIterations = 2, runs = 1,
+      initializationMode = initMode, seed = 42)
+    val centers2 = model2.clusterCenters
+
+    centers1.zip(centers2).foreach { case (c1, c2) =>
+      assert(c1 ~== c2 absTol 1E-14)
     }
   }
 
@@ -147,6 +190,40 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
       initializationMode = K_MEANS_PARALLEL)
     assert(model.clusterCenters.head ~== center absTol 1E-5)
   }
+
+  test("single cluster with big dataset - spherical") {
+    val smallData = Array(
+      Vectors.dense(1.0, 2.0, 6.0),
+      Vectors.dense(1.0, 3.0, 0.0),
+      Vectors.dense(1.0, 4.0, 6.0)
+    )
+    val data = sc.parallelize((1 to 100).flatMap(_ => smallData), 4)
+
+    // No matter how many runs or iterations we use, we should get one cluster,
+    // centered at the mean of the points
+
+    val center = Vectors.dense(1.0, 3.0, 4.0)
+
+    var model = KMeans.trainSpherical(data, k = 1, maxIterations = 1)
+    assert(model.clusterCenters.size === 1)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 2)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 5)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 5)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 5)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 1, initializationMode = RANDOM)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+  }
+
 
   test("single cluster with sparse data") {
 
@@ -194,6 +271,50 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
 
     data.unpersist()
   }
+
+  test("single cluster with sparse data - spherical") {
+
+    val n = 10000
+    val data = sc.parallelize((1 to 100).flatMap { i =>
+      val x = i / 1000.0
+      Array(
+        Vectors.sparse(n, Seq((0, 1.0 + x), (1, 2.0), (2, 6.0))),
+        Vectors.sparse(n, Seq((0, 1.0 - x), (1, 2.0), (2, 6.0))),
+        Vectors.sparse(n, Seq((0, 1.0), (1, 3.0 + x))),
+        Vectors.sparse(n, Seq((0, 1.0), (1, 3.0 - x))),
+        Vectors.sparse(n, Seq((0, 1.0), (1, 4.0), (2, 6.0 + x))),
+        Vectors.sparse(n, Seq((0, 1.0), (1, 4.0), (2, 6.0 - x)))
+      )
+    }, 4)
+
+    data.persist()
+
+    // No matter how many runs or iterations we use, we should get one cluster,
+    // centered at the mean of the points
+
+    val center = Vectors.sparse(n, Seq((0, 1.0), (1, 3.0), (2, 4.0)))
+
+    var model = KMeans.trainSpherical(data, k = 1, maxIterations = 1)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 2)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 5)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 5)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 5)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 1, initializationMode = RANDOM)
+    assert(model.clusterCenters.head ~== center absTol 1E-5)
+
+    data.unpersist()
+  }
+
 
   test("k-means|| initialization") {
 
@@ -257,6 +378,74 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
       assert(predicts(0) != predicts(3))
     }
   }
+
+  test("two clusters - spherical") {
+    val points = Seq(
+      Vectors.dense(0.0, 5.0),
+      Vectors.dense(0.0, 0.1),
+      Vectors.dense(0.1, 0.0),
+      Vectors.dense(9.0, 0.0),
+      Vectors.dense(0.1, 9.2),
+      Vectors.dense(9.2, 0.0)
+    )
+    val rdd = sc.parallelize(points, 3)
+    val initMode = RANDOM
+    val model = KMeans.trainSpherical(rdd, k = 2, maxIterations = 5, runs = 1, initMode)
+
+    val predicts = model.predict(rdd).collect()
+
+    assert(predicts(0) === predicts(1))
+    assert(predicts(0) === predicts(4))
+    assert(predicts(2) === predicts(3))
+    assert(predicts(2) === predicts(5))
+    assert(predicts(0) != predicts(2))
+  }
+
+  test("three clusters") {
+    val points = Seq(
+      Vectors.dense(0.0, 0.0, 0.1),
+      Vectors.dense(0.0, 0.1, 0.0),
+      Vectors.dense(0.1, 0.0, 0.0),
+      Vectors.dense(0.0, 0.0, 1000.0),
+      Vectors.dense(0.0, 1000.0, 0.0),
+      Vectors.dense(1000.0, 0.0, 0.0)
+    )
+    val rdd = sc.parallelize(points, 3)
+    val initMode = RANDOM
+    val model = KMeans.train(rdd, k = 3, maxIterations = 5, runs = 1, initMode)
+
+    val predicts = model.predict(rdd).collect()
+
+    assert(predicts(0) === predicts(1))
+    assert(predicts(0) === predicts(2))
+    assert(predicts(0) != predicts(3))
+    assert(predicts(0) != predicts(4))
+    assert(predicts(0) != predicts(5))
+  }
+
+  test("three clusters - spherical") {
+    val points = Seq(
+      Vectors.dense(0.0, 0.0, 0.1),
+      Vectors.dense(0.0, 0.0, 1000.0),
+      Vectors.dense(0.0, 0.1, 0.0),
+      Vectors.dense(0.0, 1000.0, 0.0),
+      Vectors.dense(0.1, 0.0, 0.0),
+      Vectors.dense(1000.0, 0.0, 0.0)
+    )
+    val rdd = sc.parallelize(points, 3)
+    val initMode = RANDOM
+    val model = KMeans.trainSpherical(rdd, k = 3, maxIterations = 5, runs = 1, initMode)
+
+    val predicts = model.predict(rdd).collect()
+
+    assert(predicts(0) === predicts(1))
+    assert(predicts(2) === predicts(3))
+    assert(predicts(4) === predicts(5))
+    assert(predicts(0) != predicts(2))
+    assert(predicts(0) != predicts(4))
+    assert(predicts(2) != predicts(4))
+  }
+
 }
 
 class KMeansClusterSuite extends FunSuite with LocalClusterSparkContext {
