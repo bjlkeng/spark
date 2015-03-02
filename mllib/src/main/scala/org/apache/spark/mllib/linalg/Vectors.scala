@@ -435,66 +435,6 @@ object Vectors {
   }
 
   /**
-   * Returns the dot product between two Vectors.
-   * @param v1 first Vector.
-   * @param v2 second Vector.
-   * @return squared distance between two Vectors.
-   */
-  def dot(v1: Vector, v2: Vector): Double = {
-    require(v1.size == v2.size, "vector dimension mismatch")
-    var result = 0.0
-    (v1, v2) match {
-      case (v1: SparseVector, v2: SparseVector) =>
-        val v1Values = v1.values
-        val v1Indices = v1.indices
-        val v2Values = v2.values
-        val v2Indices = v2.indices
-
-        var i = 0
-        var j = 0
-        while (i < v1Indices.size && j < v2Indices.size) {
-          var score = 0.0
-          if (v1Indices(i) == v2Indices(j)) {
-            result += v1Values(i) * v2Values(j)
-            i += 1
-            j += 1
-          } else if (v1Indices(i) < v2Indices(j)) {
-            i += 1
-          } else {
-            j += 1
-          }
-        }
-
-      case (v1: DenseVector, v2: DenseVector) =>
-        for (i <- 0 until v1.size) {
-          result += v1.values(i) * v2.values(i)
-        }
-
-      case (v1: SparseVector, v2: DenseVector) =>
-        result = dot(v1, v2)
-
-      case (v1: DenseVector, v2: SparseVector) =>
-        result = dot(v2, v1)
-
-      case _ =>
-        throw new IllegalArgumentException("Do not support vector type " + v1.getClass +
-          " and " + v2.getClass)
-    }
-    result
-  }
-
-  /**
-   * Returns the squared distance between DenseVector and SparseVector.
-   */
-  private[mllib] def dot(v1: SparseVector, v2: DenseVector): Double = {
-    var result = 0.0
-    for (i <- 0 until v1.indices.size) {
-      result += v1.values(i) * v2.values(v1.indices(i))
-    }
-    result
-  }
-
-  /**
    * Check equality between sparse/dense vectors
    */
   private[mllib] def equals(

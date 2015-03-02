@@ -21,8 +21,8 @@ import scala.collection.mutable.ArrayBuffer
 
 import org.apache.spark.Logging
 import org.apache.spark.annotation.Experimental
-import org.apache.spark.mllib.linalg.{Vector, Vectors}
-import org.apache.spark.mllib.linalg.BLAS.{axpy, scal}
+import org.apache.spark.mllib.linalg.{Vector, Vectors, SparseVector, DenseVector}
+import org.apache.spark.mllib.linalg.BLAS.{axpy, scal, dot}
 import org.apache.spark.mllib.util.MLUtils
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
@@ -141,7 +141,7 @@ class KMeans private (
     val norms = data.map(Vectors.norm(_, 2.0))
     norms.persist()
     val zippedData = data.zip(norms).map { case (v, norm) =>
-      new VectorWithNorm(v, norm)
+      new VectorWithNorm(v, norm, useCosineDist)
     }
     val model = runAlgorithm(zippedData)
     norms.unpersist()
@@ -228,7 +228,7 @@ class KMeans private (
           val (sum, count) = totalContribs((i, j))
           if (count != 0) {
             scal(1.0 / count, sum)
-            val newCenter = new VectorWithNorm(sum)
+            val newCenter = new VectorWithNorm(sum, useCosineDist)
             if (KMeans.fastSquaredDistance(newCenter, centers(run)(j)) > epsilon * epsilon) {
               changed = true
             }
@@ -271,7 +271,7 @@ class KMeans private (
     // Sample all the cluster centers in one pass to avoid repeated scans
     val sample = data.takeSample(true, runs * k, new XORShiftRandom(this.seed).nextInt()).toSeq
     Array.tabulate(runs)(r => sample.slice(r * k, (r + 1) * k).map { v =>
-      new VectorWithNorm(Vectors.dense(v.vector.toArray), v.norm)
+      new VectorWithNorm(Vectors.dense(v.vector.toArray), v.norm, useCosineDist)
     }.toArray)
   }
 
@@ -546,8 +546,9 @@ object KMeans {
           }
       } else {
         // Use Cosine Distance = 1 - cos(\theta) = 1 - A \cdot B / (||A|| * ||B||)
-        val dot: Double = Vectors.dot(center.vector, point.vector)
-        val distance: Double = 1 -  dot / center.norm / point.norm
+        // Norms should be unit length -- no need to divide
+        val product: Double = dot(center.vector, point.vector)
+        val distance: Double = 1 - product
         if (distance < bestDistance) {
           bestDistance = distance
           bestIndex = i
@@ -584,10 +585,25 @@ object KMeans {
  * @see [[org.apache.spark.mllib.clustering.KMeans#fastSquaredDistance]]
  */
 private[clustering]
-class VectorWithNorm(val vector: Vector, val norm: Double) extends Serializable {
+class VectorWithNorm(_vector: Vector, _norm: Double, shouldNormalize: Boolean) extends Serializable {
+  val (vector, norm) = {
+    var v: Vector = _vector
+    var n: Double = _norm
+    if (shouldNormalize) {
+      if (math.abs(_norm) < 1e-40)
+        throw new IllegalArgumentException("Zero length vector unsupported.")
+      scal(1.0 / _norm, v)
+      n = 1.0
+    }
+    (v, n)
+  }
 
+  def this(vector: Vector, norm: Double) = this(vector, norm, false)
+  def this(vector: Vector, shouldNormalize: Boolean) = this(vector, Vectors.norm(vector, 2.0),
+                                                            shouldNormalize)
   def this(vector: Vector) = this(vector, Vectors.norm(vector, 2.0))
-
+  def this(array: Array[Double], shouldNormalize: Boolean) = this(Vectors.dense(array), 
+                                                                  shouldNormalize)
   def this(array: Array[Double]) = this(Vectors.dense(array))
 
   /** Converts the vector to a dense vector. */
