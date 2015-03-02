@@ -223,10 +223,18 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
     )
     val data = sc.parallelize((1 to 100).flatMap(_ => smallData), 4)
 
-    // No matter how many runs or iterations we use, we should get one cluster,
-    // centered at the mean of the points
-
-    val center = Vectors.dense(1.0, 3.0, 4.0)
+    // Compute the center which should be the unit-length mean of the
+    // unit-length points.
+    val norms = smallData.map(Vectors.norm(_, 2.0))
+    val unitPoints = smallData.clone()
+    for ((x, i) <- unitPoints.zipWithIndex) 
+        scal(1.0 / norms(i), x)
+    val sum = Vectors.zeros(3)
+    for (x <- smallData)
+        axpy(1.0, x, sum)
+    scal(1.0 / 3.0, sum)
+    scal(1.0 / Vectors.norm(sum, 2.0), sum)
+    val center = sum
 
     var model = KMeans.trainSpherical(data, k = 1, maxIterations = 1)
     assert(model.clusterCenters.size === 1)
@@ -250,7 +258,6 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
 
 
   test("single cluster with sparse data") {
-
     val n = 10000
     val data = sc.parallelize((1 to 100).flatMap { i =>
       val x = i / 1000.0
@@ -297,9 +304,7 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
   }
 
   test("single cluster with sparse data - spherical") {
-
-    val n = 10000
-    val data = sc.parallelize((1 to 100).flatMap { i =>
+    val points = (1 to 100).flatMap { i =>
       val x = i / 1000.0
       Array(
         Vectors.sparse(n, Seq((0, 1.0 + x), (1, 2.0), (2, 6.0))),
@@ -309,12 +314,25 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
         Vectors.sparse(n, Seq((0, 1.0), (1, 4.0), (2, 6.0 + x))),
         Vectors.sparse(n, Seq((0, 1.0), (1, 4.0), (2, 6.0 - x)))
       )
-    }, 4)
+    }
+    val n = 10000
+    val data = sc.parallelize(points, 4)
 
     data.persist()
 
-    // No matter how many runs or iterations we use, we should get one cluster,
-    // centered at the mean of the points
+    // Compute the center which should be the unit-length mean of the
+    // unit-length points.
+    val norms = points.map(Vectors.norm(_, 2.0))
+    val unitPoints = List(points)
+    for ((x, i) <- unitPoints.zipWithIndex) 
+        scal(1.0 / norms(i), x)
+    val sum = Vectors.zeros(3)
+    for (x <- points)
+        axpy(1.0, x, sum)
+    scal(1.0 / n, sum)
+    scal(1.0 / Vectors.norm(sum, 2.0), sum)
+    val center = sum
+
 
     val center = Vectors.sparse(n, Seq((0, 1.0), (1, 3.0), (2, 4.0)))
 
