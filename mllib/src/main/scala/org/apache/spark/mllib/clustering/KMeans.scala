@@ -464,12 +464,11 @@ object KMeans {
       k: Int,
       maxIterations: Int,
       runs: Int,
-      initializationMode: String,
       seed: Long): KMeansModel = {
     new KMeans().setK(k)
       .setMaxIterations(maxIterations)
       .setRuns(runs)
-      .setInitializationMode(initializationMode)
+      .setInitializationMode(KMeans.RANDOM)
       .setSeed(seed)
       .setSpherical(true)
       .run(data)
@@ -488,12 +487,11 @@ object KMeans {
       data: RDD[Vector],
       k: Int,
       maxIterations: Int,
-      runs: Int,
-      initializationMode: String): KMeansModel = {
+      runs: Int): KMeansModel = {
     new KMeans().setK(k)
       .setMaxIterations(maxIterations)
       .setRuns(runs)
-      .setInitializationMode(initializationMode)
+      .setInitializationMode(KMeans.RANDOM)
       .setSpherical(true)
       .run(data)
   }
@@ -505,18 +503,7 @@ object KMeans {
       data: RDD[Vector],
       k: Int,
       maxIterations: Int): KMeansModel = {
-    trainSpherical(data, k, maxIterations, 1, RANDOM)
-  }
-
-  /**
-   * Trains a k-means model using specified parameters and the default values for unspecified.
-   */
-  def trainSpherical(
-      data: RDD[Vector],
-      k: Int,
-      maxIterations: Int,
-      runs: Int): KMeansModel = {
-    trainSpherical(data, k, maxIterations, runs, RANDOM)
+    trainSpherical(data, k, maxIterations, 1)
   }
 
   /**

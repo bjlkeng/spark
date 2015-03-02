@@ -102,7 +102,7 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
     model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 5)
     assert(model.clusterCenters.head ~== center absTol 1E-5)
 
-    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 1, initializationMode = RANDOM)
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 1)
     assert(model.clusterCenters.head ~== center absTol 1E-5)
   }
 
@@ -252,7 +252,7 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
     model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 5)
     assert(model.clusterCenters.head ~== center absTol 1E-5)
 
-    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 1, initializationMode = RANDOM)
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 1)
     assert(model.clusterCenters.head ~== center absTol 1E-5)
   }
 
@@ -349,7 +349,7 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
     model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 5)
     assert(model.clusterCenters.head ~== center absTol 1E-5)
 
-    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 1, initializationMode = RANDOM)
+    model = KMeans.trainSpherical(data, k = 1, maxIterations = 1, runs = 1)
     assert(model.clusterCenters.head ~== center absTol 1E-5)
 
     data.unpersist()
@@ -421,10 +421,12 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
 
   test("two clusters - euclidean vs spherical") {
     val points = Seq(
+      Vectors.dense(0.50, 0.85),
       Vectors.dense(0.50, 0.866),
       Vectors.dense(0.866, 0.50),
       Vectors.dense(50, 86.6),
-      Vectors.dense(86.6, 50)
+      Vectors.dense(86.6, 50),
+      Vectors.dense(86.6, 51)
     )
     val rdd = sc.parallelize(points, 3)
 
@@ -434,17 +436,19 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
     val predicts = model.predict(rdd).collect()
 
     assert(predicts(0) === predicts(1))
-    assert(predicts(2) === predicts(3))
-    assert(predicts(0) != predicts(2))
+    assert(predicts(0) === predicts(2))
+    assert(predicts(3) === predicts(4))
+    assert(predicts(3) === predicts(5))
+    assert(predicts(0) != predicts(3))
 
-    val model2 = KMeans.trainSpherical(rdd, k = 2, maxIterations = 5, runs = 1, initMode)
+    val model2 = KMeans.trainSpherical(rdd, k = 2, maxIterations = 5, runs = 1)
     val predicts2 = model2.predict(rdd).collect()
 
-    println(model2.clusterCenters.head)
-    println(model2.clusterCenters.last)
-    assert(predicts2(0) === predicts2(2))
-    assert(predicts2(1) === predicts2(3))
-    assert(predicts2(0) != predicts2(1))
+    assert(predicts2(0) === predicts2(1))
+    assert(predicts2(0) === predicts2(3))
+    assert(predicts2(2) === predicts2(4))
+    assert(predicts2(2) === predicts2(5))
+    assert(predicts2(0) != predicts2(2))
   }
 
 }

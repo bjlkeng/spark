@@ -285,6 +285,32 @@ private[python] class PythonMLLibAPI extends Serializable {
   }
 
   /**
+   * Java stub for Python mllib KMeans.run()
+   */
+  def trainSphericalKMeansModel(
+      data: JavaRDD[Vector],
+      k: Int,
+      maxIterations: Int,
+      runs: Int,
+      seed: java.lang.Long): KMeansModel = {
+    val kMeansAlg = new KMeans()
+      .setK(k)
+      .setMaxIterations(maxIterations)
+      .setRuns(runs)
+      .setInitializationMode(KMeans.RANDOM)
+      .setSpherical(true)
+
+    if (seed != null) kMeansAlg.setSeed(seed)
+
+    try {
+      kMeansAlg.run(data.rdd.persist(StorageLevel.MEMORY_AND_DISK))
+    } finally {
+      data.rdd.unpersist(blocking = false)
+    }
+  }
+
+
+  /**
    * Java stub for Python mllib GaussianMixture.run()
    * Returns a list containing weights, mean and covariance of each mixture component.
    */

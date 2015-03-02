@@ -57,7 +57,7 @@ class KMeansModel(object):
     <type 'list'>
     """
 
-    def __init__(self, centers):
+    def __init__(self, centers, is_spherical=False):
         self.centers = centers
 
     @property
@@ -87,6 +87,18 @@ class KMeans(object):
                               runs, initializationMode, seed)
         centers = callJavaFunc(rdd.context, model.clusterCenters)
         return KMeansModel([c.toArray() for c in centers])
+
+class SphericalKMeans(object):
+
+    @classmethod
+    def train(cls, rdd, k, maxIterations=100, runs=1, seed=None):
+        """Train a spherical k-means clustering model."""
+        initializationMode="k-means||",
+        model = callMLlibFunc("trainSphericalKMeansModel", rdd.map(_convert_to_vector), k, maxIterations,
+                              runs, seed)
+        centers = callJavaFunc(rdd.context, model.clusterCenters)
+        return KMeansModel([c.toArray() for c in centers], is_spherical=True)
+
 
 
 class GaussianMixtureModel(object):
