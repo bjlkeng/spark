@@ -167,6 +167,18 @@ class ListTests(PySparkTestCase):
             # TODO: Allow small numeric difference.
             self.assertTrue(array_equal(c1, c2))
 
+    def test_sphericalkmeans(self):
+        from pyspark.mllib.clustering import SphericalKMeans
+        data = [
+            [0, 1.1],
+            [0.1, 1.2],
+            [1.1, 0.1],
+            [1.2, 0],
+        ]
+        clusters = SphericalKMeans.train(self.sc.parallelize(data), 2)
+        self.assertEquals(clusters.predict(data[0]), clusters.predict(data[1]))
+        self.assertEquals(clusters.predict(data[2]), clusters.predict(data[3]))
+
     def test_gmm(self):
         from pyspark.mllib.clustering import GaussianMixture
         data = self.sc.parallelize([

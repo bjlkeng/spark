@@ -572,13 +572,15 @@ object KMeans {
  * @see [[org.apache.spark.mllib.clustering.KMeans#fastSquaredDistance]]
  */
 private[clustering]
-class VectorWithNorm(_vector: Vector, _norm: Double, shouldNormalize: Boolean) extends Serializable {
+class VectorWithNorm( _vector: Vector, _norm: Double, shouldNormalize: Boolean) 
+    extends Serializable {
   val (vector, norm) = {
     var v: Vector = _vector
     var n: Double = _norm
     if (shouldNormalize) {
-      if (math.abs(_norm) < 1e-40)
+      if (math.abs(_norm) < 1e-40) {
         throw new IllegalArgumentException("Zero length vector unsupported.")
+      }
       scal(1.0 / _norm, v)
       n = 1.0
     }

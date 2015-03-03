@@ -93,7 +93,6 @@ class SphericalKMeans(object):
     @classmethod
     def train(cls, rdd, k, maxIterations=100, runs=1, seed=None):
         """Train a spherical k-means clustering model."""
-        initializationMode="k-means||",
         model = callMLlibFunc("trainSphericalKMeansModel", rdd.map(_convert_to_vector), k, maxIterations,
                               runs, seed)
         centers = callJavaFunc(rdd.context, model.clusterCenters)
