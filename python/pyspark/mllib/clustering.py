@@ -16,11 +16,12 @@
 #
 
 from numpy import array
+from numpy.linalg import norm
 
 from pyspark import RDD
 from pyspark import SparkContext
 from pyspark.mllib.common import callMLlibFunc, callJavaFunc
-from pyspark.mllib.linalg import DenseVector, SparseVector, _convert_to_vector
+from pyspark.mllib.linalg import DenseVector, SparseVector, Vectors, _convert_to_vector
 from pyspark.mllib.stat.distribution import MultivariateGaussian
 
 __all__ = ['KMeansModel', 'KMeans', 'GaussianMixtureModel', 'GaussianMixture']
@@ -59,6 +60,7 @@ class KMeansModel(object):
 
     def __init__(self, centers, is_spherical=False):
         self.centers = centers
+        self.is_spherical = is_spherical
 
     @property
     def clusterCenters(self):
@@ -67,14 +69,29 @@ class KMeansModel(object):
 
     def predict(self, x):
         """Find the cluster to which x belongs in this model."""
+        x = _convert_to_vector(x)
+        if self.is_spherical:
+            # Normalize point to unit-length
+            nparr = x.toArray()
+            l2norm = norm(nparr)
+            if abs(l2norm) <= 1e-40:
+                raise Exception("Near zero distance not supported for spherical clustering")
+            nparr /= l2norm
+            x = nparr
+
         best = 0
         best_distance = float("inf")
-        x = _convert_to_vector(x)
         for i in xrange(len(self.centers)):
-            distance = x.squared_distance(self.centers[i])
+            if self.is_spherical:
+                # 1 - cos(\theta) = 1 - x \cdot y / |x| / |y|
+                distance = 1 - self.centers[i].dot(x)
+            else:
+                distance = x.squared_distance(self.centers[i])
+
             if distance < best_distance:
                 best = i
                 best_distance = distance
+
         return best
 
 

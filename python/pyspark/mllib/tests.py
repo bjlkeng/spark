@@ -170,15 +170,21 @@ class ListTests(PySparkTestCase):
     def test_sphericalkmeans(self):
         from pyspark.mllib.clustering import SphericalKMeans
         data = [
-            [0, 1.1],
-            [0.1, 1.2],
-            [1.1, 0.1],
-            [1.2, 0],
+            [0.50, 0.85],
+            [0.50, 0.866],
+            [0.866, 0.50],
+            [50, 86.6],
+            [86.6, 50],
+            [86.6, 51],
         ]
         clusters = SphericalKMeans.train(self.sc.parallelize(data), 2)
-        self.assertEquals(clusters.predict(data[0]), clusters.predict(data[1]))
-        self.assertEquals(clusters.predict(data[2]), clusters.predict(data[3]))
 
+        self.assertEquals(clusters.predict(data[0]), clusters.predict(data[1]))
+        self.assertEquals(clusters.predict(data[0]), clusters.predict(data[3]))
+        self.assertEquals(clusters.predict(data[2]), clusters.predict(data[4]))
+        self.assertEquals(clusters.predict(data[2]), clusters.predict(data[5]))
+        self.assertTrue(clusters.predict(data[0]) != clusters.predict(data[2]))
+  
     def test_gmm(self):
         from pyspark.mllib.clustering import GaussianMixture
         data = self.sc.parallelize([
