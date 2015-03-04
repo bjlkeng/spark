@@ -120,6 +120,7 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
     assert(model.clusterCenters.size === 2)
 
     model = KMeans.trainSpherical(data, k=2, maxIterations=1)
+    assert(Vectors.norm(model.clusterCenters.head, 2.0) ~== 1.0 absTol 1E-8)
     assert(model.clusterCenters.size === 2)
   }
 
@@ -134,6 +135,7 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
     var model = KMeans.train(data, k=3, maxIterations=1)
     assert(model.clusterCenters.size === 3)
     model = KMeans.trainSpherical(data, k=3, maxIterations=1)
+    assert(Vectors.norm(model.clusterCenters.head, 2.0) ~== 1.0 absTol 1E-8)
     assert(model.clusterCenters.size === 3)
   }
 
@@ -442,6 +444,8 @@ class KMeansSuite extends FunSuite with MLlibTestSparkContext {
     assert(predicts(0) != predicts(3))
 
     val model2 = KMeans.trainSpherical(rdd, k = 2, maxIterations = 5, runs = 1)
+    assert(Vectors.norm(model2.clusterCenters.head, 2.0) ~== 1.0 absTol 1E-8)
+    assert(Vectors.norm(model2.clusterCenters.last, 2.0) ~== 1.0 absTol 1E-8)
     val predicts2 = model2.predict(rdd).collect()
 
     assert(predicts2(0) === predicts2(1))

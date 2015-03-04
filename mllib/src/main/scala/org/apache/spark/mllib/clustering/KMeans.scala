@@ -138,13 +138,23 @@ class KMeans private (
     }
 
     // Compute squared norms and cache them.
-    val norms = data.map(Vectors.norm(_, 2.0))
-    norms.persist()
-    val zippedData = data.zip(norms).map { case (v, norm) =>
-      new VectorWithNorm(v, norm, useCosineDist)
+    var norms = None: Option[RDD[Double]]
+    val zippedData = if (!useCosineDist) {
+      norms = Some(data.map(Vectors.norm(_, 2.0)).persist())
+      data.zip(norms.get).map { case (v, norm) =>
+        new VectorWithNorm(v, norm, useCosineDist)
+      }
+    } else {
+      // Cache results so don't re-normalize every time
+      data.map(new VectorWithNorm(_, useCosineDist))
+          .persist(StorageLevel.MEMORY_AND_DISK)
     }
+
     val model = runAlgorithm(zippedData)
-    norms.unpersist()
+
+    if (!norms.isEmpty) {
+      norms.get.unpersist()
+    }
 
     // Warn at the end of the run as well, for increased visibility.
     if (data.getStorageLevel == StorageLevel.NONE) {
@@ -535,7 +545,7 @@ object KMeans {
         // Use Cosine Distance = 1 - cos(\theta) = 1 - A \cdot B / (||A|| * ||B||)
         // Norms should be unit length -- no need to divide
         val product: Double = dot(center.vector, point.vector)
-        val distance: Double = 1 - product
+        val distance: Double = 1.0 - product
         if (distance < bestDistance) {
           bestDistance = distance
           bestIndex = i
@@ -575,16 +585,16 @@ private[clustering]
 class VectorWithNorm( _vector: Vector, _norm: Double, shouldNormalize: Boolean) 
     extends Serializable {
   val (vector, norm) = {
-    var v: Vector = _vector
-    var n: Double = _norm
     if (shouldNormalize) {
       if (math.abs(_norm) < 1e-40) {
         throw new IllegalArgumentException("Zero length vector unsupported.")
       }
+      var v: Vector = _vector.copy
       scal(1.0 / _norm, v)
-      n = 1.0
+      (v, 1.0)
+    } else {
+      (_vector, _norm)
     }
-    (v, n)
   }
 
   def this(vector: Vector, norm: Double) = this(vector, norm, false)
@@ -596,5 +606,5 @@ class VectorWithNorm( _vector: Vector, _norm: Double, shouldNormalize: Boolean)
   def this(array: Array[Double]) = this(Vectors.dense(array))
 
   /** Converts the vector to a dense vector. */
-  def toDense = new VectorWithNorm(Vectors.dense(vector.toArray), norm)
+  def toDense = new VectorWithNorm(Vectors.dense(vector.toArray), norm, shouldNormalize)
 }
