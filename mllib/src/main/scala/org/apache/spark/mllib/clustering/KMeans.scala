@@ -643,5 +643,6 @@ class VectorWithNorm( _vector: Vector, _norm: Double, shouldNormalize: Boolean)
   def this(array: Array[Double]) = this(Vectors.dense(array))
 
   /** Converts the vector to a dense vector. */
-  def toDense = new VectorWithNorm(Vectors.dense(vector.toArray), norm, shouldNormalize)
+  def toDense: VectorWithNorm = new VectorWithNorm(Vectors.dense(vector.toArray), 
+                                                   norm, shouldNormalize)
 }

@@ -245,7 +245,7 @@ class ListTests(PySparkTestCase):
         self.assertEquals(clusters.predict(data[2]), clusters.predict(data[4]))
         self.assertEquals(clusters.predict(data[2]), clusters.predict(data[5]))
         self.assertTrue(clusters.predict(data[0]) != clusters.predict(data[2]))
-  
+
     def test_gmm(self):
         from pyspark.mllib.clustering import GaussianMixture
         data = self.sc.parallelize([

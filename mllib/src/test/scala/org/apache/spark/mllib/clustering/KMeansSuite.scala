@@ -486,7 +486,7 @@ object KMeansSuite extends FunSuite {
       case _ =>
         Vectors.dense(Array.fill[Double](dim)(0.0))
     }
-    new KMeansModel(Array.fill[Vector](k)(singlePoint))
+    new KMeansModel(Array.fill[Vector](k)(singlePoint), false)
   }
 
   def checkEqual(a: KMeansModel, b: KMeansModel): Unit = {

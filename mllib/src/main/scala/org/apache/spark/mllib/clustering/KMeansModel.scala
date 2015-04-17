@@ -35,10 +35,13 @@ import org.apache.spark.sql.Row
  * A clustering model for K-means. Each point belongs to the cluster with the closest center.
  */
 class KMeansModel (val clusterCenters: Array[Vector], 
-                   val useCosineDist: Boolean) extends Serializable {
+                   val useCosineDist: Boolean) extends Saveable with Serializable {
+
+  /** Old default constructor */
+  def this(centers: Array[Vector]) = this(centers, false)
 
   /** A Java-friendly constructor that takes an Iterable of Vectors. */
-  def this(centers: java.lang.Iterable[Vector]) = this(centers.asScala.toArray, False)
+  def this(centers: java.lang.Iterable[Vector]) = this(centers.asScala.toArray, false)
 
   /** Total number of clusters. */
   def k: Int = clusterCenters.length
@@ -127,7 +130,7 @@ object KMeansModel extends Loader[KMeansModel] {
       Loader.checkSchema[Cluster](centriods.schema)
       val localCentriods = centriods.map(Cluster.apply).collect()
       assert(k == localCentriods.size)
-      new KMeansModel(localCentriods.sortBy(_.id).map(_.point))
+      new KMeansModel(localCentriods.sortBy(_.id).map(_.point), false)
     }
   }
 }
