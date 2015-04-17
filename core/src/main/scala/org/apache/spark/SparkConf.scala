@@ -68,7 +68,7 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging {
     if (value == null) {
       throw new NullPointerException("null value for " + key)
     }
-    settings.put(translateConfKey(key, warn = true), value)
+    settings.put(key, value)
     this
   }
 
@@ -133,14 +133,14 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging {
   }
 
   /** Set multiple parameters together */
-  def setAll(settings: Traversable[(String, String)]) = {
+  def setAll(settings: Traversable[(String, String)]): SparkConf = {
     this.settings.putAll(settings.toMap.asJava)
     this
   }
 
   /** Set a parameter if it isn't already configured */
   def setIfMissing(key: String, value: String): SparkConf = {
-    settings.putIfAbsent(translateConfKey(key, warn = true), value)
+    settings.putIfAbsent(key, value)
     this
   }
 
@@ -174,9 +174,45 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging {
     getOption(key).getOrElse(defaultValue)
   }
 
+  /** 
+   * Get a time parameter as seconds; throws a NoSuchElementException if it's not set. If no 
+   * suffix is provided then seconds are assumed.
+   * @throws NoSuchElementException
+   */
+  def getTimeAsSeconds(key: String): Long = {
+    Utils.timeStringAsSeconds(get(key))
+  }
+
+  /** 
+   * Get a time parameter as seconds, falling back to a default if not set. If no 
+   * suffix is provided then seconds are assumed.
+   * 
+   */
+  def getTimeAsSeconds(key: String, defaultValue: String): Long = {
+    Utils.timeStringAsSeconds(get(key, defaultValue))
+  }
+
+  /** 
+   * Get a time parameter as milliseconds; throws a NoSuchElementException if it's not set. If no 
+   * suffix is provided then milliseconds are assumed. 
+   * @throws NoSuchElementException
+   */
+  def getTimeAsMs(key: String): Long = {
+    Utils.timeStringAsMs(get(key))
+  }
+
+  /** 
+   * Get a time parameter as milliseconds, falling back to a default if not set. If no 
+   * suffix is provided then milliseconds are assumed. 
+   */
+  def getTimeAsMs(key: String, defaultValue: String): Long = {
+    Utils.timeStringAsMs(get(key, defaultValue))
+  }
+  
+
   /** Get a parameter as an Option */
   def getOption(key: String): Option[String] = {
-    Option(settings.get(translateConfKey(key)))
+    Option(settings.get(key))
   }
 
   /** Get all parameters as a list of pairs */
@@ -229,7 +265,7 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging {
   def getAppId: String = get("spark.app.id")
 
   /** Does the configuration contain a given parameter? */
-  def contains(key: String): Boolean = settings.containsKey(translateConfKey(key))
+  def contains(key: String): Boolean = settings.containsKey(key)
 
   /** Copy this object */
   override def clone: SparkConf = {
@@ -343,6 +379,13 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging {
         }
       }
     }
+
+    // Warn against the use of deprecated configs
+    deprecatedConfigs.values.foreach { dc =>
+      if (contains(dc.oldName)) {
+        dc.warn()
+      }
+    }
   }
 
   /**
@@ -362,7 +405,13 @@ private[spark] object SparkConf extends Logging {
       DeprecatedConfig("spark.files.userClassPathFirst", "spark.executor.userClassPathFirst",
         "1.3"),
       DeprecatedConfig("spark.yarn.user.classpath.first", null, "1.3",
-        "Use spark.{driver,executor}.userClassPathFirst instead."))
+        "Use spark.{driver,executor}.userClassPathFirst instead."),
+      DeprecatedConfig("spark.history.fs.updateInterval",
+        "spark.history.fs.update.interval.seconds",
+        "1.3", "Use spark.history.fs.update.interval.seconds instead"),
+      DeprecatedConfig("spark.history.updateInterval",
+        "spark.history.fs.update.interval.seconds",
+        "1.3", "Use spark.history.fs.update.interval.seconds instead"))
     configs.map { x => (x.oldName, x) }.toMap
   }
 
@@ -401,7 +450,7 @@ private[spark] object SparkConf extends Logging {
    * @param warn Whether to print a warning if the key is deprecated. Warnings will be printed
    *             only once for each key.
    */
-  def translateConfKey(userKey: String, warn: Boolean = false): String = {
+  private def translateConfKey(userKey: String, warn: Boolean = false): String = {
     deprecatedConfigs.get(userKey)
       .map { deprecatedKey =>
         if (warn) {

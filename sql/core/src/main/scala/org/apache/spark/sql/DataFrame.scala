@@ -33,7 +33,7 @@ import org.apache.spark.api.java.JavaRDD
 import org.apache.spark.api.python.SerDeUtil
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
-import org.apache.spark.sql.catalyst.{ScalaReflection, SqlParser}
+import org.apache.spark.sql.catalyst.{CatalystTypeConverters, ScalaReflection, SqlParser}
 import org.apache.spark.sql.catalyst.analysis.{UnresolvedRelation, ResolvedStar}
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.{JoinType, Inner}
@@ -41,7 +41,7 @@ import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.{EvaluatePython, ExplainCommand, LogicalRDD}
 import org.apache.spark.sql.jdbc.JDBCWriteDetails
 import org.apache.spark.sql.json.JsonRDD
-import org.apache.spark.sql.types.{NumericType, StructType}
+import org.apache.spark.sql.types._
 import org.apache.spark.sql.sources.{ResolvedDataSource, CreateTableUsingAsSelect}
 import org.apache.spark.util.Utils
 
@@ -64,7 +64,7 @@ private[sql] object DataFrame {
  *   val people = sqlContext.parquetFile("...")
  *
  *   // Create a DataFrame from data sources
- *   val df =
+ *   val df = sqlContext.load("...", "json")
  * }}}
  *
  * Once created, it can be manipulated using the various domain-specific-language (DSL) functions
@@ -80,18 +80,31 @@ private[sql] object DataFrame {
  * {{{
  *   // The following creates a new column that increases everybody's age by 10.
  *   people("age") + 10  // in Scala
+ *   people.col("age").plus(10);  // in Java
  * }}}
  *
- * A more concrete example:
+ * A more concrete example in Scala:
  * {{{
  *   // To create DataFrame using SQLContext
  *   val people = sqlContext.parquetFile("...")
  *   val department = sqlContext.parquetFile("...")
  *
- *   people.filter("age" > 30)
+ *   people.filter("age > 30")
  *     .join(department, people("deptId") === department("id"))
  *     .groupBy(department("name"), "gender")
  *     .agg(avg(people("salary")), max(people("age")))
+ * }}}
+ *
+ * and in Java:
+ * {{{
+ *   // To create DataFrame using SQLContext
+ *   DataFrame people = sqlContext.parquetFile("...");
+ *   DataFrame department = sqlContext.parquetFile("...");
+ *
+ *   people.filter("age".gt(30))
+ *     .join(department, people.col("deptId").equalTo(department("id")))
+ *     .groupBy(department.col("name"), "gender")
+ *     .agg(avg(people.col("salary")), max(people.col("age")));
  * }}}
  *
  * @groupname basic Basic DataFrame functions
@@ -102,7 +115,7 @@ private[sql] object DataFrame {
  */
 // TODO: Improve documentation.
 @Experimental
-class DataFrame protected[sql](
+class DataFrame private[sql](
     @transient val sqlContext: SQLContext,
     @DeveloperApi @transient val queryExecution: SQLContext#QueryExecution)
   extends RDDApi[Row] with Serializable {
@@ -133,7 +146,7 @@ class DataFrame protected[sql](
          _: WriteToFile =>
       LogicalRDD(queryExecution.analyzed.output, queryExecution.toRdd)(sqlContext)
     case _ =>
-      queryExecution.logical
+      queryExecution.analyzed
   }
 
   /**
@@ -145,7 +158,7 @@ class DataFrame protected[sql](
   }
 
   protected[sql] def resolve(colName: String): NamedExpression = {
-    queryExecution.analyzed.resolve(colName, sqlContext.analyzer.resolver).getOrElse {
+    queryExecution.analyzed.resolve(colName.split("\\."), sqlContext.analyzer.resolver).getOrElse {
       throw new AnalysisException(
         s"""Cannot resolve column name "$colName" among (${schema.fieldNames.mkString(", ")})""")
     }
@@ -153,15 +166,16 @@ class DataFrame protected[sql](
 
   protected[sql] def numericColumns: Seq[Expression] = {
     schema.fields.filter(_.dataType.isInstanceOf[NumericType]).map { n =>
-      queryExecution.analyzed.resolve(n.name, sqlContext.analyzer.resolver).get
+      queryExecution.analyzed.resolve(n.name.split("\\."), sqlContext.analyzer.resolver).get
     }
   }
 
   /**
    * Internal API for Python
+   * @param numRows Number of rows to show
    */
-  private[sql] def showString(): String = {
-    val data = take(20)
+  private[sql] def showString(numRows: Int): String = {
+    val data = take(numRows)
     val numCols = schema.fieldNames.length
 
     // For cells that are beyond 20 characters, replace it with the first 17 and "..."
@@ -223,11 +237,11 @@ class DataFrame protected[sql](
   def toDF(colNames: String*): DataFrame = {
     require(schema.size == colNames.size,
       "The number of columns doesn't match.\n" +
-        "Old column names: " + schema.fields.map(_.name).mkString(", ") + "\n" +
-        "New column names: " + colNames.mkString(", "))
+        s"Old column names (${schema.size}): " + schema.fields.map(_.name).mkString(", ") + "\n" +
+        s"New column names (${colNames.size}): " + colNames.mkString(", "))
 
-    val newCols = schema.fieldNames.zip(colNames).map { case (oldName, newName) =>
-      apply(oldName).as(newName)
+    val newCols = logicalPlan.output.zip(colNames).map { case (oldAttribute, newName) =>
+      Column(oldAttribute).as(newName)
     }
     select(newCols :_*)
   }
@@ -259,7 +273,7 @@ class DataFrame protected[sql](
   def printSchema(): Unit = println(schema.treeString)
 
   /**
-   * Prints the plans (logical and physical) to the console for debugging purpose.
+   * Prints the plans (logical and physical) to the console for debugging purposes.
    * @group basic
    */
   def explain(extended: Boolean): Unit = {
@@ -271,7 +285,7 @@ class DataFrame protected[sql](
   }
 
   /**
-   * Only prints the physical plan to the console for debugging purpose.
+   * Only prints the physical plan to the console for debugging purposes.
    * @group basic
    */
   def explain(): Unit = explain(extended = false)
@@ -293,9 +307,28 @@ class DataFrame protected[sql](
    *   1983  03    0.410516        0.442194
    *   1984  04    0.450090        0.483521
    * }}}
-   * @group basic
+   * @param numRows Number of rows to show
+   *
+   * @group action
    */
-  def show(): Unit = println(showString())
+  def show(numRows: Int): Unit = println(showString(numRows))
+
+  /**
+   * Displays the top 20 rows of [[DataFrame]] in a tabular form.
+   * @group action
+   */
+  def show(): Unit = show(20)
+
+  /**
+   * Returns a [[DataFrameNaFunctions]] for working with missing data.
+   * {{{
+   *   // Dropping rows containing any null values.
+   *   df.na.drop()
+   * }}}
+   *
+   * @group dfops
+   */
+  def na: DataFrameNaFunctions = new DataFrameNaFunctions(this)
 
   /**
    * Cartesian join with another [[DataFrame]].
@@ -330,11 +363,11 @@ class DataFrame protected[sql](
    * {{{
    *   // Scala:
    *   import org.apache.spark.sql.functions._
-   *   df1.join(df2, "outer", $"df1Key" === $"df2Key")
+   *   df1.join(df2, $"df1Key" === $"df2Key", "outer")
    *
    *   // Java:
    *   import static org.apache.spark.sql.functions.*;
-   *   df1.join(df2, "outer", col("df1Key") === col("df2Key"));
+   *   df1.join(df2, col("df1Key").equalTo(col("df2Key")), "outer");
    * }}}
    *
    * @param right Right side of the join.
@@ -680,7 +713,7 @@ class DataFrame protected[sql](
     val schema = ScalaReflection.schemaFor[A].dataType.asInstanceOf[StructType]
     val attributes = schema.toAttributes
     val rowFunction =
-      f.andThen(_.map(ScalaReflection.convertToCatalyst(_, schema).asInstanceOf[Row]))
+      f.andThen(_.map(CatalystTypeConverters.convertToCatalyst(_, schema).asInstanceOf[Row]))
     val generator = UserDefinedGenerator(attributes, rowFunction, input.map(_.expr))
 
     Generate(generator, join = true, outer = false, None, logicalPlan)
@@ -700,8 +733,8 @@ class DataFrame protected[sql](
     : DataFrame = {
     val dataType = ScalaReflection.schemaFor[B].dataType
     val attributes = AttributeReference(outputColumn, dataType)() :: Nil
-    def rowFunction(row: Row) = {
-      f(row(0).asInstanceOf[A]).map(o => Row(ScalaReflection.convertToCatalyst(o, dataType)))
+    def rowFunction(row: Row): TraversableOnce[Row] = {
+      f(row(0).asInstanceOf[A]).map(o => Row(CatalystTypeConverters.convertToCatalyst(o, dataType)))
     }
     val generator = UserDefinedGenerator(attributes, rowFunction, apply(inputColumn).expr :: Nil)
 
@@ -730,17 +763,81 @@ class DataFrame protected[sql](
   }
 
   /**
+   * Computes statistics for numeric columns, including count, mean, stddev, min, and max.
+   * If no columns are given, this function computes statistics for all numerical columns.
+   *
+   * This function is meant for exploratory data analysis, as we make no guarantee about the
+   * backward compatibility of the schema of the resulting [[DataFrame]]. If you want to
+   * programmatically compute summary statistics, use the `agg` function instead.
+   *
+   * {{{
+   *   df.describe("age", "height").show()
+   *
+   *   // output:
+   *   // summary age   height
+   *   // count   10.0  10.0
+   *   // mean    53.3  178.05
+   *   // stddev  11.6  15.7
+   *   // min     18.0  163.0
+   *   // max     92.0  192.0
+   * }}}
+   *
+   * @group action
+   */
+  @scala.annotation.varargs
+  def describe(cols: String*): DataFrame = {
+
+    // TODO: Add stddev as an expression, and remove it from here.
+    def stddevExpr(expr: Expression): Expression =
+      Sqrt(Subtract(Average(Multiply(expr, expr)), Multiply(Average(expr), Average(expr))))
+
+    // The list of summary statistics to compute, in the form of expressions.
+    val statistics = List[(String, Expression => Expression)](
+      "count" -> Count,
+      "mean" -> Average,
+      "stddev" -> stddevExpr,
+      "min" -> Min,
+      "max" -> Max)
+
+    val outputCols = (if (cols.isEmpty) numericColumns.map(_.prettyString) else cols).toList
+
+    val ret: Seq[Row] = if (outputCols.nonEmpty) {
+      val aggExprs = statistics.flatMap { case (_, colToAgg) =>
+        outputCols.map(c => Column(colToAgg(Column(c).expr)).as(c))
+      }
+
+      val row = agg(aggExprs.head, aggExprs.tail: _*).head().toSeq
+
+      // Pivot the data so each summary is one row
+      row.grouped(outputCols.size).toSeq.zip(statistics).map {
+        case (aggregation, (statistic, _)) => Row(statistic :: aggregation.toList: _*)
+      }
+    } else {
+      // If there are no output columns, just output a single column that contains the stats.
+      statistics.map { case (name, _) => Row(name) }
+    }
+
+    // The first column is string type, and the rest are double type.
+    val schema = StructType(
+      StructField("summary", StringType) :: outputCols.map(StructField(_, DoubleType))).toAttributes
+    LocalRelation(schema, ret)
+  }
+
+  /**
    * Returns the first `n` rows.
+   * @group action
    */
   def head(n: Int): Array[Row] = limit(n).collect()
 
   /**
    * Returns the first row.
+   * @group action
    */
   def head(): Row = head(1).head
 
   /**
    * Returns the first row. Alias for head().
+   * @group action
    */
   override def first(): Row = head()
 
@@ -807,7 +904,8 @@ class DataFrame protected[sql](
    */
   override def repartition(numPartitions: Int): DataFrame = {
     sqlContext.createDataFrame(
-      queryExecution.toRdd.map(_.copy()).repartition(numPartitions), schema)
+      queryExecution.toRdd.map(_.copy()).repartition(numPartitions),
+      schema, needsConversion = false)
   }
 
   /**
@@ -827,6 +925,11 @@ class DataFrame protected[sql](
   /**
    * @group basic
    */
+  override def cache(): this.type = persist()
+
+  /**
+   * @group basic
+   */
   override def persist(newLevel: StorageLevel): this.type = {
     sqlContext.cacheManager.cacheQuery(this, None, newLevel)
     this
@@ -840,18 +943,28 @@ class DataFrame protected[sql](
     this
   }
 
+  /**
+   * @group basic
+   */
+  override def unpersist(): this.type = unpersist(blocking = false)
+
   /////////////////////////////////////////////////////////////////////////////
   // I/O
   /////////////////////////////////////////////////////////////////////////////
 
   /**
-   * Returns the content of the [[DataFrame]] as an [[RDD]] of [[Row]]s.
+   * Represents the content of the [[DataFrame]] as an [[RDD]] of [[Row]]s. Note that the RDD is
+   * memoized. Once called, it won't change even if you change any query planning related Spark SQL
+   * configurations (e.g. `spark.sql.shuffle.partitions`).
    * @group rdd
    */
-  def rdd: RDD[Row] = {
+  lazy val rdd: RDD[Row] = {
     // use a local variable to make sure the map closure doesn't capture the whole DataFrame
     val schema = this.schema
-    queryExecution.executedPlan.execute().map(ScalaReflection.convertRowToScala(_, schema))
+    queryExecution.executedPlan.execute().mapPartitions { rows =>
+      val converter = CatalystTypeConverters.createToScalaConverter(schema)
+      rows.map(converter(_).asInstanceOf[Row])
+    }
   }
 
   /**
@@ -867,8 +980,8 @@ class DataFrame protected[sql](
   def javaRDD: JavaRDD[Row] = toJavaRDD
 
   /**
-   * Registers this RDD as a temporary table using the given name.  The lifetime of this temporary
-   * table is tied to the [[SQLContext]] that was used to create this DataFrame.
+   * Registers this [[DataFrame]] as a temporary table using the given name.  The lifetime of this
+   * temporary table is tied to the [[SQLContext]] that was used to create this DataFrame.
    *
    * @group basic
    */
@@ -1096,7 +1209,7 @@ class DataFrame protected[sql](
   @Experimental
   def insertInto(tableName: String, overwrite: Boolean): Unit = {
     sqlContext.executePlan(InsertIntoTable(UnresolvedRelation(Seq(tableName)),
-      Map.empty, logicalPlan, overwrite)).toRdd
+      Map.empty, logicalPlan, overwrite, ifNotExists = false)).toRdd
   }
 
   /**
@@ -1120,7 +1233,7 @@ class DataFrame protected[sql](
       val gen = new JsonFactory().createGenerator(writer).setRootValueSeparator(null)
 
       new Iterator[String] {
-        override def hasNext = iter.hasNext
+        override def hasNext: Boolean = iter.hasNext
         override def next(): String = {
           JsonRDD.rowToJSON(rowSchema, gen)(iter.next())
           gen.flush()
@@ -1143,7 +1256,7 @@ class DataFrame protected[sql](
   ////////////////////////////////////////////////////////////////////////////
 
   /**
-   * Save this RDD to a JDBC database at `url` under the table name `table`.
+   * Save this [[DataFrame]] to a JDBC database at `url` under the table name `table`.
    * This will run a `CREATE TABLE` and a bunch of `INSERT INTO` statements.
    * If you pass `true` for `allowExisting`, it will drop any table with the
    * given name; if you pass `false`, it will throw if the table already
@@ -1167,7 +1280,7 @@ class DataFrame protected[sql](
   }
 
   /**
-   * Save this RDD to a JDBC database at `url` under the table name `table`.
+   * Save this [[DataFrame]] to a JDBC database at `url` under the table name `table`.
    * Assumes the table already exists and has a compatible schema.  If you
    * pass `true` for `overwrite`, it will `TRUNCATE` the table before
    * performing the `INSERT`s.
