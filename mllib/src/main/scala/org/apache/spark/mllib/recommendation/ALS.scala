@@ -89,7 +89,7 @@ class ALS private (
   private var finalRDDStorageLevel: StorageLevel = StorageLevel.MEMORY_AND_DISK
 
   /** checkpoint interval */
-  private var checkpointInterval: Int = 10
+  private var checkpointInterval: Int = 3
 
   /**
    * Set the number of blocks for both user blocks and product blocks to parallelize the computation
